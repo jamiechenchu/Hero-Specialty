@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hero Specialty Optimizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Single dark theme, matching the in-game panel: gunmetal surfaces, brass accent. */
+  /* Layout: inputs panel left, ranked boards right; stacks on phones. */
+  --bg: #16171a;
+  --panel: #202226;
+  --panel-2: #2a2d32;
+  --line: #3a3d44;
+  --ink: #e9e6df;
+  --muted: #9b988f;
+  --brass: #d8a956;
+  --brass-ink: #1b1508;
+  --t-R: #d4473c; --t-G: #41a24c; --t-B: #2f80d4; --t-Y: #dfa12a; --t-P: #8c52d6;
+  --display: "Oswald", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.45; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: .02em; margin: 0; text-wrap: balance; }
+h1 { font-size: 26px; text-transform: uppercase; }
+h2 { font-size: 15px; text-transform: uppercase; color: var(--brass); letter-spacing: .08em; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 20px; }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 65ch; }
+.layout { display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 14px; }
+.inputs { position: sticky; top: 12px; }
+@media (max-width: 860px) { .inputs { position: static; } }
+
+.tile { width: 30px; height: 30px; display: inline-grid; place-items: center; font: 600 11px/1 var(--display); color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.5); flex: none; }
+.tile.R { background: var(--t-R); clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%); }
+.tile.G { background: var(--t-G); clip-path: polygon(8% 6%, 92% 6%, 92% 52%, 50% 96%, 8% 52%); }
+.tile.B { background: var(--t-B); border-radius: 50%; }
+.tile.Y { background: var(--t-Y); border-radius: 22%; }
+.tile.P { background: var(--t-P); clip-path: polygon(30% 2%, 70% 2%, 98% 30%, 98% 70%, 70% 98%, 30% 98%, 2% 70%, 2% 30%); }
+
+.inv { display: grid; gap: 8px; }
+.inv-row { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 10px; }
+.inv-row label { font-weight: 500; }
+.inv-row small { display: block; color: var(--muted); font-size: 12px; }
+.stepper { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel-2); }
+.stepper button { width: 32px; height: 32px; border: 0; background: transparent; color: var(--ink); font-size: 18px; cursor: pointer; }
+.stepper button:hover { background: var(--line); }
+.stepper input { width: 40px; height: 32px; border: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); background: var(--bg); color: var(--ink); text-align: center; font: 500 15px var(--body); font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.stepper input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.total { color: var(--muted); font-size: 13px; }
+
+.field { display: grid; gap: 4px; }
+.field label { font-size: 13px; color: var(--muted); }
+select, .w input { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; font: 500 14px var(--body); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.weights { display: grid; gap: 6px; }
+.w { display: grid; grid-template-columns: 1fr 72px; align-items: center; gap: 8px; }
+.w span { font-size: 14px; }
+.w span em { font-style: normal; color: var(--muted); font-size: 12px; margin-left: 6px; }
+.w input { width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
+.hint { color: var(--muted); font-size: 12.5px; margin: 0; }
+.warn-w { color: var(--brass); }
+.linkbtn { background: none; border: 0; color: var(--brass); cursor: pointer; padding: 0; font: 500 13px var(--body); justify-self: start; }
+
+.go { background: var(--brass); color: var(--brass-ink); border: 0; border-radius: 8px; padding: 12px; font: 600 16px var(--display); letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.go:hover { filter: brightness(1.08); }
+.go:disabled { opacity: .6; cursor: progress; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+.status { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.status .warn { color: var(--brass); }
+.results { display: grid; gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; grid-template-columns: auto 1fr; gap: 18px; }
+.card.top { border-color: var(--brass); }
+@media (max-width: 620px) { .card { grid-template-columns: 1fr; } }
+.card-head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+.rank { font: 600 13px var(--display); background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; letter-spacing: .05em; }
+.card.top .rank { background: var(--brass); color: var(--brass-ink); border-color: var(--brass); }
+.score { font: 600 22px var(--display); font-variant-numeric: tabular-nums; }
+.score small { font: 400 13px var(--body); color: var(--muted); }
+.meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.board-wrap { overflow-x: auto; }
+.board { display: grid; grid-template-columns: repeat(7, 44px); grid-template-rows: repeat(5, 44px); gap: 3px; background: #0f1012; padding: 6px; border-radius: 8px; border: 1px solid var(--line); width: max-content; }
+.cell { background: #26282c; border-radius: 4px; display: grid; place-items: center; }
+.cell:nth-child(odd) { background: #2b2d32; }
+.cell .tile { width: 36px; height: 36px; font-size: 12px; }
+.coords { display: flex; gap: 3px; padding: 0 6px; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.coords span { width: 44px; text-align: center; }
+
+.stats { display: grid; gap: 10px; align-content: start; }
+.group h3 { font: 600 12px var(--display); color: var(--muted); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; padding: 3px 9px; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.chip.rare { border-color: #6b5a33; background: #2f2a1f; }
+.chip b { color: var(--brass); font-weight: 600; }
+.chip i { font-style: normal; color: var(--muted); margin-left: 2px; }
+.leftover { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+.leftover .tile { width: 20px; height: 20px; font-size: 10px; }
+.lo { display: inline-flex; align-items: center; gap: 4px; }
+
+details.ref { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+details.ref summary { cursor: pointer; font: 600 14px var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--brass); }
+.reftable { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+.reftable th, .reftable td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.reftable th { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+.seq { display: inline-flex; gap: 3px; vertical-align: middle; }
+.seq .tile { width: 20px; height: 20px; font-size: 9px; }
+.seq.v { flex-direction: column; }
+.empty { color: var(--muted); padding: 24px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+@media (prefers-reduced-motion: no-preference) { .card { animation: rise .25s ease-out both; } @keyframes rise { from { transform: translateY(4px); } to { transform: none; } } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Hero Specialty Optimizer</h1>
+    <p class="sub">Puzzles &amp; Survival. Enter the tiles you own and your troop focus, and get the highest-value 7&times;5 layouts. Tiles can count toward several patterns at once, so the solver packs overlapping lines.</p>
+  </header>
+
+  <div class="layout">
+    <form class="panel inputs" id="form" autocomplete="off">
+      <h2>Your tiles</h2>
+      <div class="inv" id="inv"></div>
+      <div class="total" id="total"></div>
+
+      <h2>Focus</h2>
+      <div class="two">
+        <div class="field"><label for="main">Main type</label>
+          <select id="main"><option>Shooter</option><option>Fighter</option><option>Rider</option></select></div>
+        <div class="field"><label for="second">Secondary type</label>
+          <select id="second"><option>Shooter</option><option>Fighter</option><option selected>Rider</option></select></div>
+      </div>
+      <div class="weights" id="weights"></div>
+      <p class="hint">Score = points &times; weight, where 5% = 1 pt, 10% = 2 pts, 20% = 4 pts. Troop stats apply to every type. Keep the lowest weight above half the highest so a bigger card always beats a smaller one. Set a weight to 0 to ignore that type.</p>
+      <p class="hint warn-w" id="wwarn" hidden></p>
+      <button type="button" class="linkbtn" id="resetW">Reset weights from focus</button>
+
+      <button type="submit" class="go" id="go">Find best boards</button>
+    </form>
+
+    <section style="display:grid; gap:14px; align-content:start">
+      <div class="status" id="status"></div>
+      <div class="results" id="results"></div>
+      <details class="ref">
+        <summary>Pattern reference</summary>
+        <table class="reftable" id="ref"></table>
+        <p class="hint" style="margin-top:8px">Rows read left to right, columns top to bottom. Row and column versions are separate cards and both count. The same card twice (e.g. two Green-Yellow-Purple rows) counts once.</p>
+      </details>
+    </section>
+  </div>
+</div>
+
+<script id="solver-src" type="text/plain">// Hero Specialty solver (shared by test harness and the web page)
+const ROWS = 5, COLS = 7, N = ROWS * COLS;
+const COLORS = ['R', 'G', 'B', 'Y', 'P']; // Red=Shooter, Green=Fighter, Blue=Rider, Yellow=Troop HP, Purple=Troop DEF
+const CI = { R: 0, G: 1, B: 2, Y: 3, P: 4 };
+
+// Pattern catalog: each stat = a color sequence read left->right (H) and/or top->bottom (V).
+// To add Epic/Legendary patterns later, add rows here.
+const STATS = [];
+// 20 cards, matching the in-game catalog. Horizontal and vertical versions are separate cards and stack.
+[
+  // name,        cat,       pct, tier,     seq,   dirs
+  ['Shooter HP',  'Shooter', 10, 'Common', 'RYP', 'H'],
+  ['Fighter HP',  'Fighter', 10, 'Common', 'GYP', 'H'],
+  ['Rider HP',    'Rider',   10, 'Common', 'BYP', 'H'],
+  ['Shooter DEF', 'Shooter', 10, 'Common', 'RYP', 'V'],
+  ['Fighter DEF', 'Fighter', 10, 'Common', 'GYP', 'V'],
+  ['Rider DEF',   'Rider',   10, 'Common', 'BYP', 'V'],
+  ['Troop DEF',   'Troop',    5, 'Common', 'RGB', 'HV'],
+  ['Troop HP',    'Troop',    5, 'Common', 'BGR', 'HV'],
+  ['Shooter ATK', 'Shooter', 20, 'Rare',   'RRRR', 'HV'],
+  ['Fighter ATK', 'Fighter', 20, 'Rare',   'GGGG', 'HV'],
+  ['Rider ATK',   'Rider',   20, 'Rare',   'BBBB', 'HV'],
+  ['Troop DEF',   'Troop',   20, 'Rare',   'PPPP', 'HV'],
+  ['Troop HP',    'Troop',   20, 'Rare',   'YYYY', 'HV'],
+].forEach(([name, cat, pct, tier, seq, dirs]) => {
+  for (const d of dirs) STATS.push({ id: seq + '_' + d, name, cat, pct, tier, seq, dirs: d, dir: d === 'H' ? 'row' : 'column' });
+});
+
+// Precompute placements: list of [cell, colorIndex]
+function placementsFor(stat) {
+  const out = [], L = stat.seq.length;
+  if (stat.dirs.includes('H'))
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c + L <= COLS; c++)
+      out.push([...stat.seq].map((ch, k) => [r * COLS + c + k, CI[ch]]));
+  if (stat.dirs.includes('V'))
+    for (let c = 0; c < COLS; c++) for (let r = 0; r + L <= ROWS; r++)
+      out.push([...stat.seq].map((ch, k) => [(r + k) * COLS + c, CI[ch]]));
+  return out;
+}
+STATS.forEach(s => { s.places = placementsFor(s); s.need = [0,0,0,0,0]; for (const ch of s.seq) s.need[CI[ch]]++; });
+
+// Which stats are active on a finished board (includes incidental matches)
+function evaluate(grid) {
+  return STATS.filter(s => s.places.some(p => p.every(([cell, col]) => grid[cell] === col)));
+}
+
+// ---- Branch & bound directly on the board (replaces subset enumeration) ----
+function solveBB(budget, weights, K = 5, opts = {}) {
+  const timeLimit = opts.timeLimit || 20000;
+  const t0 = Date.now();
+  const w = s => (s.pct / 5) * (weights[s.cat] ?? 0);   // points: 5% = 1, 10% = 2, 20% = 4
+  const stats = STATS.filter(s => w(s) > 0 && s.need.every((n, c) => n <= budget[c])).sort((a, b) => w(b) - w(a));
+  const n = stats.length, wt = stats.map(w);
+  const grid = new Int8Array(N).fill(-1), used = [0, 0, 0, 0, 0];
+  const top = []; // {score, tiles, grid, key}
+  let nodes = 0, timedOut = false;
+  const thresh = () => top.length < K ? -1 : top[top.length - 1].score;
+  function record(tiles) {
+    const g = Int8Array.from(grid), act = evaluate(g);
+    const score = act.reduce((a, s) => a + w(s), 0);
+    const key = act.map(s => s.id).sort().join('|');
+    const ex = top.findIndex(t => t.key === key);
+    if (ex >= 0) { if (top[ex].tiles <= tiles) return; top.splice(ex, 1); }
+    else if (top.length >= K && score <= thresh()) return;
+    top.push({ score, tiles, grid: g, key, active: act });
+    top.sort((a, b) => b.score - a.score || a.tiles - b.tiles);
+    if (top.length > K) top.pop();
+  }
+  const newCnt = [0, 0, 0, 0, 0];
+  function compat(p) {
+    newCnt.fill(0);
+    for (const [cell, col] of p) { const g = grid[cell]; if (g === col) continue; if (g !== -1) return false; newCnt[col]++; }
+    for (let c = 0; c < 5; c++) if (used[c] + newCnt[c] > budget[c]) return false;
+    return true;
+  }
+  function dfs(i, score, tiles) {
+    if (timedOut) return;
+    if ((++nodes & 1023) === 0 && Date.now() - t0 > timeLimit) { timedOut = true; return; }
+    // Bound: current + every remaining stat that still has a compatible placement
+    let bound = score;
+    const opts_ = [];
+    for (let k = i; k < n; k++) {
+      let any = false;
+      for (const p of stats[k].places) if (compat(p)) { any = true; break; }
+      if (any) bound += wt[k];
+    }
+    if (bound <= thresh() + 1e-9) return;
+    if (i === n) { record(tiles); return; }
+    const s = stats[i];
+    const list = [];
+    let present = false;
+    for (const p of s.places) if (compat(p)) {
+      let t = 0; for (let c = 0; c < 5; c++) t += newCnt[c];
+      if (t === 0) { present = true; break; }
+      list.push([p, t]);
+    }
+    if (present) { dfs(i + 1, score + wt[i], tiles); return; }
+    list.sort((a, b) => a[1] - b[1]);
+    for (const [p] of list) {
+      const added = [];
+      for (const [cell, col] of p) if (grid[cell] === -1) { grid[cell] = col; used[col]++; added.push(cell); }
+      dfs(i + 1, score + wt[i], tiles + added.length);
+      for (const cell of added) { used[grid[cell]]--; grid[cell] = -1; }
+      if (timedOut) return;
+    }
+    dfs(i + 1, score, tiles); // skip this stat
+  }
+  dfs(0, 0, 0);
+  return { results: top.map(t => ({ grid: t.grid, tiles: t.tiles, active: t.active, score: t.score, exact: !timedOut })), timedOut, checked: nodes, unknown: 0, ms: Date.now() - t0 };
+}
+
+
+self.onmessage = e => {
+  const { budget, weights, K, opts } = e.data;
+  const out = solveBB(budget, weights, K, opts);
+  self.postMessage({ ...out, results: out.results.map(r => ({ grid: Array.from(r.grid), tiles: r.tiles, score: r.score, exact: r.exact, active: r.active.map(s => s.id) })) });
+};
+</script>
+<script>
+const COLOR_INFO = {
+  R: { name: 'Red',    role: 'Shooter',   lbl: 'S' },
+  G: { name: 'Green',  role: 'Fighter',   lbl: 'F' },
+  B: { name: 'Blue',   role: 'Rider',     lbl: 'R' },
+  Y: { name: 'Yellow', role: 'Troop HP',  lbl: 'HP' },
+  P: { name: 'Purple', role: 'Troop DEF', lbl: 'DF' },
+};
+const ORDER = ['R', 'G', 'B', 'Y', 'P'];            // solver's color index (do not reorder)
+const GAME_ORDER = ['G', 'B', 'P', 'Y', 'R'];       // display order, matches the in-game tile bar
+const CATS = ['Shooter', 'Fighter', 'Rider', 'Troop'];
+const src = document.getElementById('solver-src').textContent;
+// Stat catalog for display (same source the worker runs)
+const STATS = new Function(src.replace(/self\.onmessage[\s\S]*$/, '') + '; return STATS;')();
+const byId = Object.fromEntries(STATS.map(s => [s.id, s]));
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('hs-' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('hs-' + k, JSON.stringify(v)); } catch {} },
+};
+const tileEl = (c, cls = '') => `<span class="tile ${c} ${cls}" title="${COLOR_INFO[c].name} (${COLOR_INFO[c].role})">${COLOR_INFO[c].lbl}</span>`;
+
+// Inventory (example defaults = the board from the sample screenshot)
+let counts = store.get('counts', { R: 4, G: 2, B: 2, Y: 4, P: 4 });
+const inv = document.getElementById('inv');
+inv.innerHTML = GAME_ORDER.map(c => `
+  <div class="inv-row">
+    ${tileEl(c)}
+    <label for="n-${c}">${COLOR_INFO[c].name}<small>${COLOR_INFO[c].role}</small></label>
+    <div class="stepper">
+      <button type="button" data-c="${c}" data-d="-1" aria-label="One fewer ${COLOR_INFO[c].name}">&minus;</button>
+      <input id="n-${c}" type="number" min="0" max="35" inputmode="numeric" value="${counts[c] ?? 0}">
+      <button type="button" data-c="${c}" data-d="1" aria-label="One more ${COLOR_INFO[c].name}">+</button>
+    </div>
+  </div>`).join('');
+function readCounts() {
+  ORDER.forEach(c => { const v = Math.max(0, Math.min(35, parseInt(document.getElementById('n-' + c).value, 10) || 0)); counts[c] = v; });
+  const t = ORDER.reduce((a, c) => a + counts[c], 0);
+  document.getElementById('total').textContent = `${t} tiles owned · board holds 35`;
+  store.set('counts', counts);
+}
+inv.addEventListener('click', e => {
+  const b = e.target.closest('button[data-c]'); if (!b) return;
+  const i = document.getElementById('n-' + b.dataset.c);
+  i.value = Math.max(0, Math.min(35, (parseInt(i.value, 10) || 0) + +b.dataset.d)); readCounts();
+});
+inv.addEventListener('input', readCounts);
+readCounts();
+
+// Focus & weights
+const mainSel = document.getElementById('main'), secSel = document.getElementById('second');
+const focus = store.get('focus', { main: 'Shooter', second: 'Rider' });
+mainSel.value = focus.main; secSel.value = focus.second;
+let weights = store.get('weights-v2', null);   // v2: narrow weights (old saved values ignored)
+function defaultWeights() {
+  const w = {};
+  CATS.forEach(c => w[c] = 0.7);
+  w.Troop = 0.9;
+  if (secSel.value !== mainSel.value) w[secSel.value] = 0.8;
+  w[mainSel.value] = 1.0;
+  return w;
+}
+function roleOf(c) {
+  if (c === 'Troop') return 'all types';
+  if (c === mainSel.value) return 'main';
+  if (c === secSel.value) return 'secondary';
+  return 'other';
+}
+function renderWeights() {
+  const order = [mainSel.value, 'Troop', secSel.value, ...CATS].filter((c, i, a) => a.indexOf(c) === i);
+  document.getElementById('weights').innerHTML = order.map(c => `
+    <div class="w"><span>${c}<em>${roleOf(c)}</em></span>
+    <input id="w-${c}" type="number" step="0.05" min="0" max="2" value="${weights[c]}" aria-label="${c} weight"></div>`).join('');
+}
+if (!weights) weights = defaultWeights();
+renderWeights();
+function checkWeights() {
+  const vals = CATS.map(c => weights[c]).filter(v => v > 0);
+  const el = document.getElementById('wwarn');
+  if (vals.length && Math.min(...vals) * 2 <= Math.max(...vals)) {
+    el.hidden = false;
+    el.textContent = 'With these weights a low-priority card can lose to a smaller high-priority card (for example, a 10% card can lose to a 5% one).';
+  } else el.hidden = true;
+}
+checkWeights();
+document.getElementById('weights').addEventListener('input', e => {
+  const c = e.target.id.slice(2); weights[c] = Math.max(0, parseFloat(e.target.value) || 0); store.set('weights-v2', weights); checkWeights();
+});
+function onFocusChange() { weights = defaultWeights(); store.set('weights-v2', weights); store.set('focus', { main: mainSel.value, second: secSel.value }); renderWeights(); checkWeights(); }
+mainSel.addEventListener('change', onFocusChange); secSel.addEventListener('change', onFocusChange);
+document.getElementById('resetW').addEventListener('click', onFocusChange);
+
+// Reference table
+document.getElementById('ref').innerHTML = '<tr><th>Card</th><th>Tier</th><th>Pattern</th></tr>' +
+  STATS.map(s => `<tr><td>${s.name} +${s.pct}%</td><td>${s.tier}</td>
+    <td><span class="seq ${s.dirs === 'V' ? 'v' : ''}">${[...s.seq].map(c => tileEl(c)).join('')}</span> <span class="hint">${s.dir}</span></td></tr>`).join('');
+
+// Solving
+const worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+const status = document.getElementById('status'), results = document.getElementById('results'), go = document.getElementById('go');
+let running = false, lastDeep = false;
+
+function run(deep) {
+  if (running) return;
+  readCounts();
+  const budget = ORDER.map(c => counts[c]);
+  if (budget.every(x => x === 0)) { results.innerHTML = '<div class="empty">Add some tiles to get started.</div>'; status.textContent = ''; return; }
+  running = true; lastDeep = deep; go.disabled = true;
+  status.innerHTML = deep ? 'Deep search running: proving the single best board. This can take up to 4 minutes&hellip;' : 'Searching. Most inventories finish in a few seconds, at most 20&hellip;';
+  worker.postMessage({ budget, weights: { ...weights }, K: deep ? 1 : 5, opts: { timeLimit: deep ? 240000 : 20000 } });
+}
+worker.onmessage = e => { running = false; go.disabled = false; render(e.data); };
+worker.onerror = e => { running = false; go.disabled = false; status.textContent = 'The solver hit an error: ' + e.message + '. Try again or lower the tile counts.'; };
+
+function render(out) {
+  const w = s => (s.pct / 5) * (weights[s.cat] || 0);
+  let note = `${(out.ms / 1000).toFixed(1)} s · ` + (out.timedOut
+    ? `<span class="warn">Best found before the time limit; not proven optimal.</span>` + (lastDeep ? '' : ' <button type="button" class="linkbtn" id="deep">Run deep search (up to 4 min)</button>')
+    : 'Proven optimal for these tiles and weights');
+  status.innerHTML = note;
+  const d = document.getElementById('deep'); if (d) d.addEventListener('click', () => run(true));
+  if (!out.results.length) { results.innerHTML = '<div class="empty">No pattern fits these tiles. Every stat needs at least 3 tiles in a line, such as Red + Yellow + Purple.</div>'; return; }
+  results.innerHTML = out.results.map((r, i) => {
+    const used = { R: 0, G: 0, B: 0, Y: 0, P: 0 };
+    r.grid.forEach(v => { if (v >= 0) used[ORDER[v]]++; });
+    const act = r.active.map(id => byId[id]);
+    const groups = [mainSel.value, 'Troop', secSel.value, ...CATS].filter((c, k, a) => a.indexOf(c) === k)
+      .map(c => [c, act.filter(s => s.cat === c).sort((a, b) => b.pct - a.pct)]).filter(([, l]) => l.length);
+    const missing = STATS.filter(s => !r.active.includes(s.id) && w(s) > 0).sort((a, b) => w(b) - w(a));
+    return `<article class="card ${i === 0 ? 'top' : ''}">
+      <div class="card-head">
+        <span class="rank">${i === 0 ? 'BEST' : '#' + (i + 1)}</span>
+        <span class="score">${r.score.toFixed(1)} <small>points</small></span>
+        <span class="meta">${act.length} cards · ${r.tiles} tiles placed</span>
+      </div>
+      <div class="board-wrap">
+        <div class="board" role="img" aria-label="Board layout ${i + 1}">${r.grid.map(v => `<div class="cell">${v >= 0 ? tileEl(ORDER[v]) : ''}</div>`).join('')}</div>
+      </div>
+      <div class="stats">
+        ${groups.map(([c, l]) => `<div class="group"><h3>${c} · ${roleOf(c)}</h3><div class="chips">${l.map(s => `<span class="chip ${s.tier === 'Rare' ? 'rare' : ''}" title="${s.dir}">${s.name} <b>+${s.pct}%</b> <i>${s.dir === 'row' ? '&harr;' : '&varr;'}</i></span>`).join('')}</div></div>`).join('')}
+        <div class="leftover">Left over: ${GAME_ORDER.map(c => `<span class="lo">${tileEl(c)}${counts[c] - used[c]}</span>`).join('')}</div>
+        ${missing.length ? `<p class="hint">Not reached: ${missing.map(s => `${s.name} +${s.pct}% (${s.dir})`).join(', ')}</p>` : ''}
+      </div>
+    </article>`;
+  }).join('');
+}
+
+document.getElementById('form').addEventListener('submit', e => { e.preventDefault(); run(false); });
+run(false);
+</script>
+</body>
+</html>
