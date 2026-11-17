@@ -86,7 +86,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .score small { font: 400 13px var(--body); color: var(--muted); }
 .meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 
-.board-wrap { overflow-x: auto; }
+.board-wrap { overflow-x: auto; display: grid; gap: 6px; align-content: start; }
+.board-label { font: 600 12px var(--display); color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+.board-label:not(:first-child) { margin-top: 6px; }
 .board { display: grid; grid-template-columns: repeat(7, 44px); grid-template-rows: repeat(5, 44px); gap: 3px; background: #0f1012; padding: 6px; border-radius: 8px; border: 1px solid var(--line); width: max-content; }
 .cell { background: #26282c; border-radius: 4px; display: grid; place-items: center; }
 .cell:nth-child(odd) { background: #2b2d32; }
@@ -185,22 +187,29 @@ const STATS = [];
   for (const d of dirs) STATS.push({ id: seq + '_' + d, name, cat, pct, tier, seq, dirs: d, dir: d === 'H' ? 'row' : 'column' });
 });
 
-// Precompute placements: list of [cell, colorIndex]
-function placementsFor(stat) {
-  const out = [], L = stat.seq.length;
+// Precompute placements for each board: list of [cell, colorIndex]. Board b uses cells b*35 .. b*35+34.
+function placementsFor(stat, board) {
+  const out = [], L = stat.seq.length, off = board * N;
   if (stat.dirs.includes('H'))
     for (let r = 0; r < ROWS; r++) for (let c = 0; c + L <= COLS; c++)
-      out.push([...stat.seq].map((ch, k) => [r * COLS + c + k, CI[ch]]));
+      out.push([...stat.seq].map((ch, k) => [off + r * COLS + c + k, CI[ch]]));
   if (stat.dirs.includes('V'))
     for (let c = 0; c < COLS; c++) for (let r = 0; r + L <= ROWS; r++)
-      out.push([...stat.seq].map((ch, k) => [(r + k) * COLS + c, CI[ch]]));
+      out.push([...stat.seq].map((ch, k) => [off + (r + k) * COLS + c, CI[ch]]));
   return out;
 }
-STATS.forEach(s => { s.places = placementsFor(s); s.need = [0,0,0,0,0]; for (const ch of s.seq) s.need[CI[ch]]++; });
+STATS.forEach(s => {
+  s.placesB = [placementsFor(s, 0), placementsFor(s, 1)];
+  s.places = s.placesB[0];                       // board 1 only
+  s.places2 = [...s.placesB[0], ...s.placesB[1]]; // both boards
+  s.need = [0,0,0,0,0]; for (const ch of s.seq) s.need[CI[ch]]++;
+});
+const TWO_BOARD_MIN_TILES = 30;   // game unlocks Specialty 2 at 30+ total tiles
 
-// Which stats are active on a finished board (includes incidental matches)
+// Which cards are active (includes incidental matches). Each card counts once across both boards.
 function evaluate(grid) {
-  return STATS.filter(s => s.places.some(p => p.every(([cell, col]) => grid[cell] === col)));
+  const two = grid.length > N;
+  return STATS.filter(s => (two ? s.places2 : s.places).some(p => p.every(([cell, col]) => grid[cell] === col)));
 }
 
 // ---- Branch & bound directly on the board (replaces subset enumeration) ----
@@ -208,14 +217,18 @@ function solveBB(budget, weights, K = 5, opts = {}) {
   const timeLimit = opts.timeLimit || 20000;
   const t0 = Date.now();
   const w = s => (s.pct / 5) * (weights[s.cat] ?? 0);   // points: 5% = 1, 10% = 2, 20% = 4
-  const stats = STATS.filter(s => w(s) > 0 && s.need.every((n, c) => n <= budget[c])).sort((a, b) => w(b) - w(a));
+  const excl = new Set(opts.exclude || []);   // cards already made elsewhere (other board)
+  const stats = STATS.filter(s => !excl.has(s.id) && w(s) > 0 && s.need.every((n, c) => n <= budget[c])).sort((a, b) => w(b) - w(a));
   const n = stats.length, wt = stats.map(w);
-  const grid = new Int8Array(N).fill(-1), used = [0, 0, 0, 0, 0];
+  const boards = opts.boards || 1;
+  const PL = s => boards === 2 ? s.places2 : s.places;
+  const grid = new Int8Array(N * boards).fill(-1), used = [0, 0, 0, 0, 0];
+  let placed = 0;   // tiles on the grid (for symmetry breaking)
   const top = []; // {score, tiles, grid, key}
   let nodes = 0, timedOut = false;
   const thresh = () => top.length < K ? -1 : top[top.length - 1].score;
   function record(tiles) {
-    const g = Int8Array.from(grid), act = evaluate(g);
+    const g = Int8Array.from(grid), act = evaluate(g).filter(s => !excl.has(s.id));
     const score = act.reduce((a, s) => a + w(s), 0);
     const key = act.map(s => s.id).sort().join('|');
     const ex = top.findIndex(t => t.key === key);
@@ -224,6 +237,12 @@ function solveBB(budget, weights, K = 5, opts = {}) {
     top.push({ score, tiles, grid: g, key, active: act });
     top.sort((a, b) => b.score - a.score || a.tiles - b.tiles);
     if (top.length > K) top.pop();
+  }
+  // Seeds: known-good boards (e.g. the one-board optimum) give the search a floor to beat.
+  for (const sg of (opts.seeds || [])) {
+    grid.set(sg.length === grid.length ? sg : Int8Array.from([...sg, ...new Array(grid.length - sg.length).fill(-1)]));
+    record(Array.from(grid).filter(v => v >= 0).length);
+    grid.fill(-1);
   }
   const newCnt = [0, 0, 0, 0, 0];
   function compat(p) {
@@ -240,7 +259,7 @@ function solveBB(budget, weights, K = 5, opts = {}) {
     const opts_ = [];
     for (let k = i; k < n; k++) {
       let any = false;
-      for (const p of stats[k].places) if (compat(p)) { any = true; break; }
+      for (const p of PL(stats[k])) if (compat(p)) { any = true; break; }
       if (any) bound += wt[k];
     }
     if (bound <= thresh() + 1e-9) return;
@@ -248,7 +267,9 @@ function solveBB(budget, weights, K = 5, opts = {}) {
     const s = stats[i];
     const list = [];
     let present = false;
-    for (const p of s.places) if (compat(p)) {
+    // Symmetry: the two boards are interchangeable, so the first card placed always goes on board 1.
+    const cand = (boards === 2 && placed === 0) ? s.places : PL(s);
+    for (const p of cand) if (compat(p)) {
       let t = 0; for (let c = 0; c < 5; c++) t += newCnt[c];
       if (t === 0) { present = true; break; }
       list.push([p, t]);
@@ -258,7 +279,9 @@ function solveBB(budget, weights, K = 5, opts = {}) {
     for (const [p] of list) {
       const added = [];
       for (const [cell, col] of p) if (grid[cell] === -1) { grid[cell] = col; used[col]++; added.push(cell); }
+      placed += added.length;
       dfs(i + 1, score + wt[i], tiles + added.length);
+      placed -= added.length;
       for (const cell of added) { used[grid[cell]]--; grid[cell] = -1; }
       if (timedOut) return;
     }
@@ -268,11 +291,55 @@ function solveBB(budget, weights, K = 5, opts = {}) {
   return { results: top.map(t => ({ grid: t.grid, tiles: t.tiles, active: t.active, score: t.score, exact: !timedOut })), timedOut, checked: nodes, unknown: 0, ms: Date.now() - t0 };
 }
 
+// ---- Two boards (Specialty 1 + 2): shared tile pool, each card counts once across both ----
+// Alternating optimization: best Board 1 -> best Board 2 from leftovers (only new cards) ->
+// re-solve Board 1 around Board 2 -> repeat until no gain. Started from each top Board 1 layout.
+function usage(g) { const u = [0, 0, 0, 0, 0]; for (const v of g) if (v >= 0) u[v]++; return u; }
+function solveTwo(budget, weights, K = 5, opts = {}) {
+  const t0 = Date.now(), total = opts.timeLimit || 30000;
+  const w = s => (s.pct / 5) * (weights[s.cat] ?? 0);
+  const left = () => Math.max(500, total - (Date.now() - t0));
+  const first = solveBB(budget, weights, K, { timeLimit: Math.min(left() * 0.4, 12000) });
+  let timedOut = first.timedOut;
+  const combos = [];
+  const starts = first.results.map(r => r.grid);
+  for (let si = 0; si < starts.length; si++) {
+    const slots = starts.length - si;
+    const budgetMs = () => Math.max(300, left() / slots / 4);
+    let g1 = starts[si], g2 = new Int8Array(N).fill(-1), best = -1;
+    for (let it = 0; it < 4; it++) {
+      // Board 2 from leftovers, excluding Board 1's cards
+      const u1 = usage(g1), rem2 = budget.map((b, c) => b - u1[c]);
+      const ex1 = evaluate(g1).map(s => s.id);
+      const r2 = solveBB(rem2, weights, 1, { timeLimit: budgetMs(), exclude: ex1, seeds: [g2].filter(g => usage(g).every((x, c) => x <= rem2[c])) });
+      if (r2.timedOut) timedOut = true;
+      if (r2.results.length) g2 = r2.results[0].grid;
+      // Board 1 again, around Board 2
+      const u2 = usage(g2), rem1 = budget.map((b, c) => b - u2[c]);
+      const ex2 = evaluate(g2).map(s => s.id);
+      const r1 = solveBB(rem1, weights, 1, { timeLimit: budgetMs(), exclude: ex2, seeds: [g1] });
+      if (r1.timedOut) timedOut = true;
+      if (r1.results.length) g1 = r1.results[0].grid;
+      const both = new Int8Array(2 * N); both.set(g1, 0); both.set(g2, N);
+      const sc = evaluate(both).reduce((a, s) => a + w(s), 0);
+      if (sc <= best + 1e-9) break;
+      best = sc;
+    }
+    const both = new Int8Array(2 * N); both.set(g1, 0); both.set(g2, N);
+    const act = evaluate(both);
+    combos.push({ grid: both, active: act, score: act.reduce((a, s) => a + w(s), 0), tiles: usage(both).reduce((a, b) => a + b, 0), exact: false });
+    if (Date.now() - t0 > total) { timedOut = true; break; }
+  }
+  const seen = new Set(), out = [];
+  combos.sort((a, b) => b.score - a.score || a.tiles - b.tiles);
+  for (const c of combos) { const k = c.active.map(s => s.id).sort().join('|'); if (!seen.has(k)) { seen.add(k); out.push(c); } }
+  return { results: out.slice(0, K), timedOut, twoBoards: true, ms: Date.now() - t0 };
+}
 
 self.onmessage = e => {
   const { budget, weights, K, opts } = e.data;
-  const out = solveBB(budget, weights, K, opts);
-  self.postMessage({ ...out, results: out.results.map(r => ({ grid: Array.from(r.grid), tiles: r.tiles, score: r.score, exact: r.exact, active: r.active.map(s => s.id) })) });
+  const out = opts.boards === 2 ? solveTwo(budget, weights, K, opts) : solveBB(budget, weights, K, opts);
+  self.postMessage({ ...out, boards: opts.boards || 1, results: out.results.map(r => ({ grid: Array.from(r.grid), tiles: r.tiles, score: r.score, exact: r.exact, active: r.active.map(s => s.id) })) });
 };
 </script>
 <script>
@@ -313,7 +380,7 @@ inv.innerHTML = GAME_ORDER.map(c => `
 function readCounts() {
   ORDER.forEach(c => { const v = Math.max(0, Math.min(35, parseInt(document.getElementById('n-' + c).value, 10) || 0)); counts[c] = v; });
   const t = ORDER.reduce((a, c) => a + counts[c], 0);
-  document.getElementById('total').textContent = `${t} tiles owned · board holds 35`;
+  document.getElementById('total').textContent = t >= 30 ? `${t} tiles owned · Specialty 2 unlocked: solving both boards` : `${t} tiles owned · Specialty 2 unlocks at 30`;
   store.set('counts', counts);
 }
 inv.addEventListener('click', e => {
@@ -382,18 +449,26 @@ function run(deep) {
   readCounts();
   const budget = ORDER.map(c => counts[c]);
   if (budget.every(x => x === 0)) { results.innerHTML = '<div class="empty">Add some tiles to get started.</div>'; status.textContent = ''; return; }
+  const two = budget.reduce((a, b) => a + b, 0) >= 30;   // Specialty 2 unlocks at 30+ total tiles
   running = true; lastDeep = deep; go.disabled = true;
-  status.innerHTML = deep ? 'Deep search running: proving the single best board. This can take up to 4 minutes&hellip;' : 'Searching. Most inventories finish in a few seconds, at most 20&hellip;';
-  worker.postMessage({ budget, weights: { ...weights }, K: deep ? 1 : 5, opts: { timeLimit: deep ? 240000 : 20000 } });
+  status.innerHTML = two
+    ? (deep ? 'Deep two-board search running. Up to 2 minutes&hellip;' : 'Searching both boards. Up to 30 seconds&hellip;')
+    : (deep ? 'Deep search running: proving the single best board. This can take up to 4 minutes&hellip;' : 'Searching. Most inventories finish in a few seconds, at most 20&hellip;');
+  worker.postMessage({ budget, weights: { ...weights }, K: (deep && !two) ? 1 : 5, opts: two ? { boards: 2, timeLimit: deep ? 120000 : 30000 } : { timeLimit: deep ? 240000 : 20000 } });
 }
 worker.onmessage = e => { running = false; go.disabled = false; render(e.data); };
 worker.onerror = e => { running = false; go.disabled = false; status.textContent = 'The solver hit an error: ' + e.message + '. Try again or lower the tile counts.'; };
 
 function render(out) {
   const w = s => (s.pct / 5) * (weights[s.cat] || 0);
-  let note = `${(out.ms / 1000).toFixed(1)} s · ` + (out.timedOut
+  const maxAll = STATS.reduce((a, s) => a + w(s), 0);
+  const allCards = out.results.length && out.results[0].score >= maxAll - 1e-9;
+  let note = `${(out.ms / 1000).toFixed(1)} s · `;
+  if (allCards) note += 'Every card reached: the maximum possible score';
+  else if (out.boards === 2) note += `<span class="warn">Two boards: best layout found. The two-board search can't prove optimality.</span>` + (lastDeep ? '' : ' <button type="button" class="linkbtn" id="deep">Search longer (up to 2 min)</button>');
+  else note += out.timedOut
     ? `<span class="warn">Best found before the time limit; not proven optimal.</span>` + (lastDeep ? '' : ' <button type="button" class="linkbtn" id="deep">Run deep search (up to 4 min)</button>')
-    : 'Proven optimal for these tiles and weights');
+    : 'Proven optimal for these tiles and weights';
   status.innerHTML = note;
   const d = document.getElementById('deep'); if (d) d.addEventListener('click', () => run(true));
   if (!out.results.length) { results.innerHTML = '<div class="empty">No pattern fits these tiles. Every stat needs at least 3 tiles in a line, such as Red + Yellow + Purple.</div>'; return; }
@@ -411,7 +486,9 @@ function render(out) {
         <span class="meta">${act.length} cards · ${r.tiles} tiles placed</span>
       </div>
       <div class="board-wrap">
-        <div class="board" role="img" aria-label="Board layout ${i + 1}">${r.grid.map(v => `<div class="cell">${v >= 0 ? tileEl(ORDER[v]) : ''}</div>`).join('')}</div>
+        ${[0, 1].slice(0, r.grid.length / 35).map(b => `
+          ${r.grid.length > 35 ? `<div class="board-label">Specialty ${b + 1}</div>` : ''}
+          <div class="board" role="img" aria-label="Layout ${i + 1}, Specialty ${b + 1}">${r.grid.slice(b * 35, b * 35 + 35).map(v => `<div class="cell">${v >= 0 ? tileEl(ORDER[v]) : ''}</div>`).join('')}</div>`).join('')}
       </div>
       <div class="stats">
         ${groups.map(([c, l]) => `<div class="group"><h3>${c} · ${roleOf(c)}</h3><div class="chips">${l.map(s => `<span class="chip ${s.tier === 'Rare' ? 'rare' : ''}" title="${s.dir}">${s.name} <b>+${s.pct}%</b> <i>${s.dir === 'row' ? '&harr;' : '&varr;'}</i></span>`).join('')}</div></div>`).join('')}
